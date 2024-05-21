@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import './App.css';
 import VideoThumbnail from './VideoThumbnail';
@@ -9,8 +9,73 @@ function App() {
   const [query, setQuery] = useState('');
   const [videos, setVideos] = useState([]);
   const [selectedVideo, setSelectedVideo] = useState(null);
-  const [chatInput, setChatInput] = useState('');
-  const [chatResponse, setChatResponse] = useState('');
+  /*const [chatInput, setChatInput] = useState('');
+  const [chatResponse, setChatResponse] = useState('');*/
+  const playerRef = useRef(null);
+
+  useEffect(() => {
+    console.log('Adding YouTube Iframe API script');
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    const firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+    window.onYouTubeIframeAPIReady = () => {
+      console.log('YouTube Iframe API is ready');
+      playerRef.current = new window.YT.Player('videoPlayer', {
+        events: {
+          onReady: onPlayerReady,
+          onStateChange: onPlayerStateChange
+        }
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    socket.on('sync', data => {
+      console.log('Sync event received:', data);
+      setSelectedVideo(data.videoId);
+      if (playerRef.current && playerRef.current.loadVideoById) {
+        playerRef.current.loadVideoById(data.videoId, data.timestamp);
+      } else {
+        console.error('Player is not ready');
+      }
+    });
+
+    socket.on('play', () => {
+      console.log('Play event received');
+      if (playerRef.current && playerRef.current.playVideo) {
+        playerRef.current.playVideo();
+      } else {
+        console.error('Player is not ready');
+      }
+    });
+
+    socket.on('pause', () => {
+      console.log('Pause event received');
+      if (playerRef.current && playerRef.current.pauseVideo) {
+        playerRef.current.pauseVideo();
+      } else {
+        console.error('Player is not ready');
+      }
+    });
+
+    socket.on('seek', data => {
+      console.log('Seek event received:', data);
+      if (playerRef.current && playerRef.current.seekTo) {
+        playerRef.current.seekTo(data.currentTime, true);
+      } else {
+        console.error('Player is not ready');
+      }
+    });
+
+    return () => {
+      socket.off('sync');
+      socket.off('play');
+      socket.off('pause');
+      socket.off('seek');
+    };
+  }, []);
 
   const searchVideos = () => {
     fetch(`/api/search?query=${query}`)
@@ -30,16 +95,31 @@ function App() {
 
   const playVideo = (videoId) => {
     setSelectedVideo(videoId);
+    console.log('Playing video:', videoId);
     socket.emit('synchronize', { videoId: videoId, timestamp: 0 });
+    if (playerRef.current) {
+      playerRef.current.loadVideoById(videoId);
+    } else {
+      console.error('Player is not ready');
+    }
   };
 
-  useEffect(() => {
-    socket.on('sync', data => {
-      setSelectedVideo(data.videoId);
-    });
-  }, []);
+  const onPlayerReady = (event) => {
+    console.log('Player is ready');
+    event.target.playVideo();
+  };
 
-  {/*const askChatbot = () => {
+  const onPlayerStateChange = (event) => {
+    if (event.data === window.YT.PlayerState.PLAYING) {
+      socket.emit('play', { currentTime: event.target.getCurrentTime() });
+    } else if (event.data === window.YT.PlayerState.PAUSED) {
+      socket.emit('pause', { currentTime: event.target.getCurrentTime() });
+    } else if (event.data === window.YT.PlayerState.BUFFERING || event.data === window.YT.PlayerState.CUED) {
+      socket.emit('seek', { currentTime: event.target.getCurrentTime() });
+    }
+  };
+
+  /*const askChatbot = () => {
     fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -49,7 +129,7 @@ function App() {
       .then(data => {
         setChatResponse(data.choices[0].text);
       });
-  };*/}
+  };*/
 
   return (
     <div className="App">
@@ -78,13 +158,7 @@ function App() {
         </header>
 
         <div id="videoPlayer">
-          {selectedVideo && (
-            <iframe
-              src={`https://www.youtube.com/embed/${selectedVideo}`}
-              style={{ border: 'none' }}
-              allowFullScreen
-            ></iframe>
-          )}
+          {selectedVideo}
         </div>
         {/*<input
           type="text"
