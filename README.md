@@ -1,2 +1,7 @@
-# StudyBot
-ReactJS application to sync videos and music together by connecting to Youtube API and WebSockets, and an AI chat bot to help study.
+# VideoSync
+A Node and React application to sync videos using YouTube's API and WebSockets.
+
+To-Do:
+ - Improve UI
+ - Add anime API
+ - Add usernames
