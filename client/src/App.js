@@ -9,20 +9,16 @@ function App() {
   const [query, setQuery] = useState('');
   const [videos, setVideos] = useState([]);
   const [selectedVideo, setSelectedVideo] = useState(null);
-  /*const [chatInput, setChatInput] = useState('');
-  const [chatResponse, setChatResponse] = useState('');*/
   const playerRef = useRef(null);
 
   useEffect(() => {
-    console.log('Adding YouTube Iframe API script');
     const tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
     const firstScriptTag = document.getElementsByTagName('script')[0];
     firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
     window.onYouTubeIframeAPIReady = () => {
-      console.log('YouTube Iframe API is ready');
-      playerRef.current = new window.YT.Player('videoPlayer', {
+      playerRef.current = new window.YT.Player('youtubePlayer', {
         events: {
           onReady: onPlayerReady,
           onStateChange: onPlayerStateChange
@@ -33,39 +29,27 @@ function App() {
 
   useEffect(() => {
     socket.on('sync', data => {
-      console.log('Sync event received:', data);
       setSelectedVideo(data.videoId);
-      if (playerRef.current && playerRef.current.loadVideoById) {
+      if (playerRef.current) {
         playerRef.current.loadVideoById(data.videoId, data.timestamp);
-      } else {
-        console.error('Player is not ready');
       }
     });
 
     socket.on('play', () => {
-      console.log('Play event received');
-      if (playerRef.current && playerRef.current.playVideo) {
+      if (playerRef.current) {
         playerRef.current.playVideo();
-      } else {
-        console.error('Player is not ready');
       }
     });
 
     socket.on('pause', () => {
-      console.log('Pause event received');
-      if (playerRef.current && playerRef.current.pauseVideo) {
+      if (playerRef.current) {
         playerRef.current.pauseVideo();
-      } else {
-        console.error('Player is not ready');
       }
     });
 
     socket.on('seek', data => {
-      console.log('Seek event received:', data);
-      if (playerRef.current && playerRef.current.seekTo) {
+      if (playerRef.current) {
         playerRef.current.seekTo(data.currentTime, true);
-      } else {
-        console.error('Player is not ready');
       }
     });
 
@@ -76,6 +60,12 @@ function App() {
       socket.off('seek');
     };
   }, []);
+
+  useEffect(() => {
+    if (selectedVideo && playerRef.current) {
+      playerRef.current.loadVideoById(selectedVideo);
+    }
+  }, [selectedVideo]);
 
   const searchVideos = () => {
     fetch(`/api/search?query=${query}`)
@@ -95,18 +85,14 @@ function App() {
 
   const playVideo = (videoId) => {
     setSelectedVideo(videoId);
-    console.log('Playing video:', videoId);
     socket.emit('synchronize', { videoId: videoId, timestamp: 0 });
-    if (playerRef.current) {
-      playerRef.current.loadVideoById(videoId);
-    } else {
-      console.error('Player is not ready');
-    }
   };
 
   const onPlayerReady = (event) => {
     console.log('Player is ready');
-    event.target.playVideo();
+    if (selectedVideo) {
+      event.target.loadVideoById(selectedVideo);
+    }
   };
 
   const onPlayerStateChange = (event) => {
@@ -118,18 +104,6 @@ function App() {
       socket.emit('seek', { currentTime: event.target.getCurrentTime() });
     }
   };
-
-  /*const askChatbot = () => {
-    fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: chatInput })
-    })
-      .then(response => response.json())
-      .then(data => {
-        setChatResponse(data.choices[0].text);
-      });
-  };*/
 
   return (
     <div className="App">
@@ -158,16 +132,8 @@ function App() {
         </header>
 
         <div id="videoPlayer">
-          {selectedVideo}
+          <div id="youtubePlayer"></div>
         </div>
-        {/*<input
-          type="text"
-          value={chatInput}
-          onChange={(e) => setChatInput(e.target.value)}
-          placeholder="Ask something..."
-        />
-        <button onClick={askChatbot}>Send</button>
-        <div id="chatResponse">{chatResponse}</div>*/}
       </div>
     </div>
   );
