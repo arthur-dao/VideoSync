@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import './App.css';
-import VideoThumbnail from './VideoThumbnail';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
 const socket = io();
 
 function App() {
-  const [query, setQuery] = useState('');
-  const [videos, setVideos] = useState([]);
-  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [url, setUrl] = useState('');
+  const [videoQueue, setVideoQueue] = useState([]);
+  const [currentVideo, setCurrentVideo] = useState(null);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+
   const playerRef = useRef(null);
 
   useEffect(() => {
@@ -27,28 +29,71 @@ function App() {
     };
   }, []);
 
+  const addVideoToQueue = () => {
+    const videoId = url.split('v=')[1] || url.split('/').pop();
+    setVideoQueue([...videoQueue, videoId]);
+    setUrl('');
+  };
+
+  const playVideo = (videoId) => {
+    setCurrentVideo(videoId);
+    socket.emit('synchronize', { videoId: videoId, timestamp: 0 });
+
+    if (playerRef.current && playerRef.current.loadVideoById) {
+      playerRef.current.loadVideoById(videoId);
+    }
+  };
+
+  const deleteQueueItem = (index) => {
+    const newQueue = [...videoQueue];
+    newQueue.splice(index, 1);
+    setVideoQueue(newQueue);
+  };
+
+  const onPlayerReady = (event) => {
+    event.target.playVideo();
+  };
+
+  const onPlayerStateChange = (event) => {
+    if (event.data === window.YT.PlayerState.PLAYING) {
+      socket.emit('play', {});
+    } else if (event.data === window.YT.PlayerState.PAUSED) {
+      socket.emit('pause', {});
+    } else if (event.data === window.YT.PlayerState.BUFFERING || event.data === window.YT.PlayerState.CUED) {
+      socket.emit('seek', { currentTime: event.target.getCurrentTime() });
+    }
+  };
+
+  const onDragEnd = (result) => {
+    if (!result.destination) return;
+    const items = Array.from(videoQueue);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
+    setVideoQueue(items);
+  };
+
   useEffect(() => {
     socket.on('sync', data => {
-      setSelectedVideo(data.videoId);
-      if (playerRef.current) {
+      setCurrentVideo(data.videoId);
+      if (playerRef.current && playerRef.current.loadVideoById) {
         playerRef.current.loadVideoById(data.videoId, data.timestamp);
       }
     });
 
     socket.on('play', () => {
-      if (playerRef.current) {
+      if (playerRef.current && playerRef.current.playVideo) {
         playerRef.current.playVideo();
       }
     });
 
     socket.on('pause', () => {
-      if (playerRef.current) {
+      if (playerRef.current && playerRef.current.pauseVideo) {
         playerRef.current.pauseVideo();
       }
     });
 
     socket.on('seek', data => {
-      if (playerRef.current) {
+      if (playerRef.current && playerRef.current.seekTo) {
         playerRef.current.seekTo(data.currentTime, true);
       }
     });
@@ -61,74 +106,59 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (selectedVideo && playerRef.current) {
-      playerRef.current.loadVideoById(selectedVideo);
-    }
-  }, [selectedVideo]);
-
-  const searchVideos = () => {
-    fetch(`/api/search?query=${query}`)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        return response.json();
-      })
-      .then(data => {
-        setVideos(data.items);
-      })
-      .catch(error => {
-        console.error('There has been a problem with your fetch operation:', error);
-      });
-  };
-
-  const playVideo = (videoId) => {
-    setSelectedVideo(videoId);
-    socket.emit('synchronize', { videoId: videoId, timestamp: 0 });
-  };
-
-  const onPlayerReady = (event) => {
-    console.log('Player is ready');
-    if (selectedVideo) {
-      event.target.loadVideoById(selectedVideo);
-    }
-  };
-
-  const onPlayerStateChange = (event) => {
-    if (event.data === window.YT.PlayerState.PLAYING) {
-      socket.emit('play', { currentTime: event.target.getCurrentTime() });
-    } else if (event.data === window.YT.PlayerState.PAUSED) {
-      socket.emit('pause', { currentTime: event.target.getCurrentTime() });
-    } else if (event.data === window.YT.PlayerState.BUFFERING || event.data === window.YT.PlayerState.CUED) {
-      socket.emit('seek', { currentTime: event.target.getCurrentTime() });
-    }
+  const toggleSidebar = () => {
+    setSidebarVisible(!sidebarVisible);
   };
 
   return (
     <div className="App">
-      <div className="sidebar">
-        <div className="searchContainer">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search for videos..."
-            className="searchInput"
-          />
-          <button onClick={searchVideos} className='searchButton'>Search</button>
-        </div>
+      <div className={`sidebar ${sidebarVisible ? '' : 'hidden'}`}>
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="Add video URL..."
+          className="urlInput"
+        />
+        <button onClick={addVideoToQueue} className='addButton'>+</button>
       
-        <div id="videoList">
-          {videos.map((video) => (
-            <VideoThumbnail key={video.id.videoId} video={video} onClick={playVideo} />
-          ))}
-        </div>
+        <DragDropContext onDragEnd={onDragEnd}>
+          <Droppable droppableId="videoQueue">
+            {(provided) => (
+              <div 
+                {...provided.droppableProps}
+                ref={provided.innerRef}
+                style={{ minHeight: '100px' }}
+              >
+                {videoQueue.map((videoId, index) => (
+                  <Draggable key={videoId} draggableId={videoId} index={index}>
+                    {(provided) => (
+                      <div
+                        className="queueItem"
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        {...provided.dragHandleProps}
+                      >
+                        <span onClick={() => playVideo(videoId)}>{videoId}</span>
+                        <button className="deleteButton" onClick={() => deleteQueueItem(index)}>Delete</button>
+                      </div>
+                    )}
+                  </Draggable>
+                ))}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </DragDropContext>
       </div>
       
       <div className="main">
         <header>
           <h1>Video Sync App</h1>
+
+          <button onClick={toggleSidebar} className='toggleSidebar'>
+            {sidebarVisible ? 'Hide' : 'Show'}
+          </button>
         </header>
 
         <div id="videoPlayer">
